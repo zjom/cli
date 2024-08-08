@@ -41,8 +41,6 @@ int main(int argc, char *argv[]) {
     case 'n':
       show_line_numbers = 1;
       break;
-    case 'a':
-      fprintf(stderr, "Option not implemented\n");
       break;
     case 'h':
       fprintf(stderr,
