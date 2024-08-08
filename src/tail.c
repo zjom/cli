@@ -1,8 +1,11 @@
+#include <errno.h>
 #include <getopt.h>
 #include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <time.h>
 
 void print_usage(const char *program_name, FILE *stream) {
   fprintf(stream,
@@ -71,15 +74,14 @@ int parse_options(int argc, char *argv[], TailOptions *options, char **path) {
   return 0;
 }
 
-void go_to_last_nth_line(FILE *file, int n) {
+void print_last_n_lines(FILE *file, int n) {
   long pos;
   int line_count = 0;
+  char buffer[BUFSIZ];
 
-  // Go to end of file
   fseek(file, 0, SEEK_END);
   pos = ftell(file);
 
-  // Read backwards until n lines are found
   while (pos && line_count < n) {
     fseek(file, --pos, SEEK_SET);
     if (fgetc(file) == '\n') {
@@ -87,9 +89,12 @@ void go_to_last_nth_line(FILE *file, int n) {
     }
   }
 
-  // Adjust position to start of line
   if (pos != 0) {
     fseek(file, pos + 1, SEEK_SET);
+  }
+
+  while (fgets(buffer, sizeof(buffer), file) != NULL) {
+    fputs(buffer, stdout);
   }
 }
 
@@ -100,17 +105,51 @@ int tail(const char *path, const TailOptions *options) {
     return -1;
   }
 
-  go_to_last_nth_line(file, options->n);
-
   if (options->show_headers) {
     printf("==> %s <==\n", path);
   }
 
-  char c;
-  while ((c = fgetc(file)) != EOF) {
-    putchar(c);
+  print_last_n_lines(file, options->n);
+  fflush(stdout);
+
+  if (options->follow) {
+    struct stat stat_buf;
+    time_t last_modified;
+
+    if (stat(path, &stat_buf) == -1) {
+      perror("stat");
+      fclose(file);
+      return -1;
+    }
+    last_modified = stat_buf.st_mtime;
+
+    while (1) {
+      clearerr(file);
+      char buffer[BUFSIZ];
+      while (fgets(buffer, sizeof(buffer), file) != NULL) {
+        fputs(buffer, stdout);
+        fflush(stdout);
+      }
+
+      // Check if file has been modified
+      if (stat(path, &stat_buf) == -1) {
+        perror("stat");
+        break;
+      }
+
+      if (stat_buf.st_mtime > last_modified) {
+        // File has been modified, seek to the end
+        fseek(file, 0, SEEK_END);
+        last_modified = stat_buf.st_mtime;
+      } else {
+        // File hasn't been modified, wait before checking again
+        struct timespec ts = {0, 250000000}; // 250ms
+        nanosleep(&ts, NULL);
+      }
+    }
   }
 
+  fclose(file);
   return 0;
 }
 
